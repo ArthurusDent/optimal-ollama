@@ -24,10 +24,6 @@ except ImportError:
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 BASE_FILENAME = "optimal_ollama_result"
 
-# ANSI Colors for bold text
-BOLD = "\033[1m"
-RESET = "\033[0m"
-
 # --- VALIDATION FUNCTIONS ---
 
 def validate_float(answers, current):
@@ -207,14 +203,13 @@ def unload_model(url, model_name):
 
 def preload_model(url, model_name, ctx_size):
     """
-    Lädt das Modell mit der Ziel-Kontextgröße in den Speicher (Warmup).
-    Sendet einen leeren Prompt, damit Ollama den VRAM reserviert.
+    Sends an empty prompt to force the model into VRAM (Warmup).
+    We ignore timeouts/results here, just want to trigger loading.
     """
     try:
-        # Minimaler Request: 1 Token generieren
         payload = {
             "model": model_name, 
-            "prompt": " ", 
+            "prompt": "", 
             "stream": False, 
             "options": {
                 "num_ctx": ctx_size, 
@@ -222,8 +217,7 @@ def preload_model(url, model_name, ctx_size):
                 "temperature": 0
             }
         }
-        # Timeout großzügig wählen, da Laden bei großen Modellen dauern kann
-        # Wir ignorieren das Ergebnis, wir wollen nur, dass es geladen ist.
+        # Generous timeout for loading large models
         requests.post(f"{url}/api/generate", json=payload, timeout=300)
     except:
         pass
@@ -239,6 +233,10 @@ def generate_dummy_prompt(target_tokens):
 def setup_benchmark():
     config = BenchmarkConfig()
     
+    # ANSI Colors
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
+    
     # 0. OS Default Log Paths
     default_log_mode = "docker"
     default_log_src = "ollama"
@@ -250,7 +248,7 @@ def setup_benchmark():
         
     elif platform.system() == "Darwin":
         default_log_mode = "file"
-        default_log_src = os.path.expanduser("~/.ollama/logs/server.log")
+        default_log_src = "~/.ollama/logs/server.log"
 
     print(f"Connecting to {config.ollama_url} ...")
     try:
@@ -290,32 +288,30 @@ def setup_benchmark():
     else:
         config.log_mode = "none"
 
-    # Q2: Models (In einer Schleife, bis eine Auswahl getroffen wurde)
+    # Q2: Models (Loop for robustness)
     q_models = [
         inquirer.Checkbox('models', 
             message=f"Select Models ({BOLD}Space{RESET} to select, {BOLD}Enter{RESET} to confirm)", 
-            choices=models,
-            # validate=... entfernen wir hier, da es unzuverlässig ist
+            choices=models
         )
     ]
     
     while True:
         ans_models = inquirer.prompt(q_models)
         
-        # Fall 1: Benutzer drückt Strg+C (Abbruch) -> ans_models ist None
+        # User pressed Ctrl+C
         if ans_models is None:
             sys.exit(0)
             
-        # Fall 2: Liste ist leer -> Fehler anzeigen und Schleife wiederholen
+        # Empty Selection
         if not ans_models['models']:
             print(f"\n{BOLD}>> Error: You must select at least one model using SPACE!{RESET}\n")
             continue
             
-        # Fall 3: Auswahl getroffen -> Schleife verlassen
         config.selected_models = ans_models['models']
         break
 
-    # Q3: Parameters (With Integer Validation)
+    # Q3: Parameters
     q_params = [
         inquirer.Text('start_ctx', message="Start Context Size", default="4096", validate=validate_int),
         inquirer.Text('max_ctx',   message="Max Context Size", default="65536", validate=validate_int),
@@ -327,7 +323,7 @@ def setup_benchmark():
     config.max_ctx = int(ans_params['max_ctx'])
     config.step_size = int(ans_params['step_size'])
 
-    # Q4: Limits (With Float Validation)
+    # Q4: Limits
     q_limits = [
         inquirer.Text('min_gpu', message="a) Min GPU % (0 for Mac/CPU)", default="0" if platform.system() == "Darwin" else "90", validate=validate_float),
         inquirer.Text('max_ram', message="b) Max System RAM GB (Stop if exceeded)", default="32.0", validate=validate_float),
@@ -349,19 +345,18 @@ def setup_benchmark():
 # --- MAIN ---
 
 def run_benchmark():
-    # 1. Setup & Konfiguration abfragen
+    # 1. Setup & Config
     config = setup_benchmark()
     
-    # 2. Dateinamen vorbereiten
+    # 2. File Prep
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     csv_filename = f"{BASE_FILENAME}_{timestamp_str}.csv"
     
-    # 3. System-Specs speichern
+    # 3. Specs
     specs_text = get_system_specs()
     with open(f"{BASE_FILENAME}_{timestamp_str}_specs.txt", "w") as f:
         f.write(specs_text)
     
-    # Kurzer System-Check auf der Konsole
     print("\n--- System Check ---")
     for line in specs_text.splitlines():
         if any(x in line for x in ["OS:", "CPU:", "GPU", "Memory", "Power"]):
@@ -371,14 +366,14 @@ def run_benchmark():
 
     ollama_ver = get_ollama_version(config.ollama_url)
 
-    # 4. CSV Header schreiben
+    # 4. CSV Header
     with open(csv_filename, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow([
             "Timestamp", "Ollama_Ver", "Model", "Model_Hash", 
             "Target_Ctx", "Actual_Ctx", 
             "Eval_Speed (t/s)", "Prompt_Speed (t/s)", "Total_Duration (s)", 
-            "GPU_Percent", "Sys_RAM_Used_GB", "VRAM_Used_GB", 
+            "GPU_Percent", "Sys_RAM_Used_GiB", "VRAM_Used_GiB", 
             "Status", "Stop_Reason",
             "AA_Intelligence", "AA_Coding", "AA_Agentic"
         ])
@@ -386,10 +381,10 @@ def run_benchmark():
     print("\n" + "="*70)
     print(f"Starting Benchmark")
     print(f"Range: {config.start_ctx} -> {config.max_ctx} (Step: {config.step_size})")
-    print(f"Limits: VRAM <{config.max_vram_budget_gb}GB | Speed >{config.min_eval_tps} t/s | Time <{config.max_duration_seconds}s")
+    print(f"Limits: VRAM <{config.max_vram_budget_gb}GiB | Speed >{config.min_eval_tps} t/s | Time <{config.max_duration_seconds}s")
     print("="*70 + "\n")
 
-    # 5. Iteration über Modelle
+    # 5. Model Loop
     for model in config.selected_models:
         model_hash = get_model_digest(config.ollama_url, model)
         print(f"--- Testing Model: {model} ({model_hash}) ---")
@@ -397,17 +392,14 @@ def run_benchmark():
         current_ctx = config.start_ctx
         
         while current_ctx <= config.max_ctx:
-            # A) Aufräumen (Clean Slate)
+            # A) Unload
             unload_model(config.ollama_url, model)
             
-            # B) Warmup / Preload (Zeit wird NICHT gemessen)
-            # \r springt an den Zeilenanfang zurück, end="" verhindert neue Zeile
+            # B) Warmup / Preload (Don't measure time)
             print(f"  > Ctx {current_ctx:<6} ... (Loading)", end="", flush=True)
-            
             preload_model(config.ollama_url, model, current_ctx)
             
-            # C) Der eigentliche Benchmark (Modell ist jetzt im VRAM)
-            # Wir überschreiben "(Loading)" mit "(Testing)"
+            # C) Actual Benchmark (Model is Hot)
             print("\r" + f"  > Ctx {current_ctx:<6} ... (Testing)", end="", flush=True)
             
             prompt = generate_dummy_prompt(int(current_ctx * 1.1))
@@ -424,36 +416,35 @@ def run_benchmark():
             }
 
             try:
-                # Timeout: User-Limit + 15s Puffer
+                # Timeout: User-Limit + Buffer
                 safe_timeout = max(60, config.max_duration_seconds + 15)
                 
-                # HIER startet die Messung
+                # Start Measurement
                 resp = requests.post(f"{config.ollama_url}/api/generate", json=payload, timeout=safe_timeout)
                 ts_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 if resp.status_code == 200:
                     data = resp.json()
                     
-                    # Metriken berechnen
-                    # load_duration sollte jetzt vernachlässigbar sein
+                    # Metrics
                     total_dur = data.get("total_duration", 0) / 1e9
                     eval_tps = data.get("eval_count", 0) / (data.get("eval_duration", 0) / 1e9 or 1)
                     prompt_tps = data.get("prompt_eval_count", 0) / (data.get("prompt_eval_duration", 0) / 1e9 or 1)
                     actual_ctx = data.get("prompt_eval_count", 0)
                     
-                    # Hardware-Stats holen (jetzt wo das Modell heiß ist)
+                    # Hardware Stats
                     size_gib, vram_gib, gpu_percent = get_gpu_stats_from_logs(config)
                     sys_ram_used = max(0, size_gib - vram_gib)
                     
-                    # Mac Special Case: Ignore GPU% check if no logs/native
+                    # Mac Special Case
                     ignore_gpu_check = (config.log_mode == "none") or (gpu_percent == 0 and platform.system() == "Darwin")
 
-                    # Abbruch-Kriterien prüfen
+                    # Check Criteria
                     stop_reason = ""
                     status = "OK"
                     should_stop = False
 
-                    # 1. Truncation (1% Toleranz)
+                    # 1. Truncation
                     if actual_ctx < (current_ctx * 0.99):
                         status = f"TRUNCATED ({actual_ctx})"
                         stop_reason = "Context Limit Reached"
@@ -467,12 +458,12 @@ def run_benchmark():
                     
                     elif vram_gib > config.max_vram_budget_gb:
                         status = "FAIL_VRAM_BUDGET"
-                        stop_reason = f"VRAM {vram_gib:.1f}GB > Budget {config.max_vram_budget_gb}GB"
+                        stop_reason = f"VRAM {vram_gib:.1f}GiB > Budget {config.max_vram_budget_gb}GiB"
                         should_stop = True
 
                     elif sys_ram_used > config.max_sys_ram_gb:
                         status = "FAIL_RAM"
-                        stop_reason = f"RAM {sys_ram_used:.1f}GB > Limit {config.max_sys_ram_gb}GB"
+                        stop_reason = f"RAM {sys_ram_used:.1f}GiB > Limit {config.max_sys_ram_gb}GiB"
                         should_stop = True
                     
                     # 3. Performance Limits
@@ -485,11 +476,10 @@ def run_benchmark():
                         stop_reason = f"Time {total_dur:.1f}s > {config.max_duration_seconds}s"
                         should_stop = True
 
-                    # Zeile überschreiben mit Ergebnis
-                    # Wir nutzen Leerzeichen am Ende, um Reste von "(Testing)" zu löschen
-                    print(f"\r  > Ctx {current_ctx:<6} -> TPS: {eval_tps:>5.1f} | Time: {total_dur:>4.1f}s | VRAM: {vram_gib:>4.1f}GB | {status}      ")
+                    # Overwrite line with result
+                    print(f"\r  > Ctx {current_ctx:<6} -> TPS: {eval_tps:>5.1f} | Time: {total_dur:>4.1f}s | Mem: {vram_gib:>4.1f}GiB | {status}      ")
                     
-                    # CSV Speichern
+                    # Save to CSV
                     with open(csv_filename, 'a', newline='') as f:
                         writer = csv.writer(f)
                         writer.writerow([
@@ -500,7 +490,7 @@ def run_benchmark():
                             status, stop_reason, "", "", ""
                         ])
                     
-                    # Abbruch verarbeiten
+                    # Handle Stop
                     if should_stop:
                         print(f"    -> STOP: {stop_reason}")
                         suggestion = current_ctx - config.step_size
@@ -520,7 +510,7 @@ def run_benchmark():
                 print(f"\nCrash/Timeout: {e}")
                 break
             
-            # Kurze Pause für System-Erholung
+            # Cooldown
             time.sleep(1)
 
 if __name__ == "__main__":
