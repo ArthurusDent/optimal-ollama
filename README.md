@@ -26,6 +26,8 @@ Running local LLMs involves a trade-off between **Context Size**, **Speed (Token
 
 ## Installation & Setup (Recommended)
 
+**IMPORTANT:** This script has been vibe-coded and has only been tested under Linux. Therefore it might not fully work on Windows or Mac. Please report any issues.
+
 To avoid conflicts with your system's Python installation, we strongly recommend using a **virtual environment**.
 
 ### 1. Clone the repository
