@@ -117,7 +117,10 @@ Select "Native Installation". The script automatically suggests the default log 
 *   Set "Min GPU %" to 0 (since Unified Memory behaves differently). Use "VRAM Budget" instead.
 
 ## Adding data from intelligence benchmarks
-Open the CSV file with the results in your favorite spreadsheet software. The last three columns can be used to add data from [Artificial Analysis](https://artificialanalysis.ai/) (or any other benchmark you'd like to compare your models to).
+
+Comparing models without official benchmark ratings would disregard important data about model performance.
+You can manually add data from sites like [Artificial Analysis](https://artificialanalysis.ai/) to the last columns in the CSV file.
+If you don't want to analyze the completed CSV yourself, feed it to an LLM.
 
 ## License
 
