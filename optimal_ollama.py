@@ -395,11 +395,11 @@ def run_benchmark():
             # A) Unload
             unload_model(config.ollama_url, model)
             
-            # B) Warmup / Preload (Don't measure time)
+            # B) Warmup / Preload
             print(f"  > Ctx {current_ctx:<6} ... (Loading)", end="", flush=True)
             preload_model(config.ollama_url, model, current_ctx)
             
-            # C) Actual Benchmark (Model is Hot)
+            # C) Actual Benchmark
             print("\r" + f"  > Ctx {current_ctx:<6} ... (Testing)", end="", flush=True)
             
             prompt = generate_dummy_prompt(int(current_ctx * 1.1))
@@ -416,11 +416,15 @@ def run_benchmark():
             }
 
             try:
-                # Timeout: User-Limit + Buffer
-                safe_timeout = max(60, config.max_duration_seconds + 15)
+                # FIX: Timeout Logik geändert
+                # Wir nehmen IMMER mindestens 1800s (Hard Limit), damit der Request durchlaufen kann,
+                # auch wenn er länger dauert als das User-Limit (config.max_duration_seconds).
+                # Falls der User ein Limit > 1800s setzt, nehmen wir das User-Limit + Puffer.
+                hard_limit = 1800 
+                network_timeout = max(hard_limit, config.max_duration_seconds + 60)
                 
                 # Start Measurement
-                resp = requests.post(f"{config.ollama_url}/api/generate", json=payload, timeout=safe_timeout)
+                resp = requests.post(f"{config.ollama_url}/api/generate", json=payload, timeout=network_timeout)
                 ts_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 if resp.status_code == 200:
@@ -471,6 +475,8 @@ def run_benchmark():
                         status = "FAIL_SPEED"
                         stop_reason = f"Speed {eval_tps:.1f} < {config.min_eval_tps} t/s"
                         should_stop = True
+                        
+                    # HIER ist der Check nun logisch korrekt NACHDEM der Request fertig ist
                     elif total_dur > config.max_duration_seconds:
                         status = "FAIL_TIME"
                         stop_reason = f"Time {total_dur:.1f}s > {config.max_duration_seconds}s"
@@ -507,7 +513,8 @@ def run_benchmark():
                     break
 
             except Exception as e:
-                print(f"\nCrash/Timeout: {e}")
+                # Dieser Block wird nur erreicht, wenn selbst die 1800s überschritten werden
+                print(f"\nCrash/Timeout (Network): {e}")
                 break
             
             # Cooldown
