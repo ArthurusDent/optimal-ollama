@@ -395,11 +395,11 @@ def run_benchmark():
             # A) Unload
             unload_model(config.ollama_url, model)
             
-            # B) Warmup / Preload
+            # B) Warmup / Preload (Don't measure time)
             print(f"  > Ctx {current_ctx:<6} ... (Loading)", end="", flush=True)
             preload_model(config.ollama_url, model, current_ctx)
             
-            # C) Actual Benchmark
+            # C) Actual Benchmark (Model is Hot)
             print("\r" + f"  > Ctx {current_ctx:<6} ... (Testing)", end="", flush=True)
             
             prompt = generate_dummy_prompt(int(current_ctx * 1.1))
@@ -416,11 +416,8 @@ def run_benchmark():
             }
 
             try:
-                # FIX: Timeout Logik geändert
-                # Wir nehmen IMMER mindestens 1800s (Hard Limit), damit der Request durchlaufen kann,
-                # auch wenn er länger dauert als das User-Limit (config.max_duration_seconds).
-                # Falls der User ein Limit > 1800s setzt, nehmen wir das User-Limit + Puffer.
-                hard_limit = 1800 
+                # Timeout: User-Limit + Buffer
+                hard_limit = 1800
                 network_timeout = max(hard_limit, config.max_duration_seconds + 60)
                 
                 # Start Measurement
@@ -475,8 +472,6 @@ def run_benchmark():
                         status = "FAIL_SPEED"
                         stop_reason = f"Speed {eval_tps:.1f} < {config.min_eval_tps} t/s"
                         should_stop = True
-                        
-                    # HIER ist der Check nun logisch korrekt NACHDEM der Request fertig ist
                     elif total_dur > config.max_duration_seconds:
                         status = "FAIL_TIME"
                         stop_reason = f"Time {total_dur:.1f}s > {config.max_duration_seconds}s"
@@ -485,7 +480,7 @@ def run_benchmark():
                     # Overwrite line with result
                     print(f"\r  > Ctx {current_ctx:<6} -> TPS: {eval_tps:>5.1f} | Time: {total_dur:>4.1f}s | Mem: {vram_gib:>4.1f}GiB | {status}      ")
                     
-                    # Save to CSV
+                    # Save to CSV (Fixed Variable Name)
                     with open(csv_filename, 'a', newline='') as f:
                         writer = csv.writer(f)
                         writer.writerow([
@@ -513,7 +508,6 @@ def run_benchmark():
                     break
 
             except Exception as e:
-                # Dieser Block wird nur erreicht, wenn selbst die 1800s überschritten werden
                 print(f"\nCrash/Timeout (Network): {e}")
                 break
             
