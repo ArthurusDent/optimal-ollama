@@ -89,6 +89,8 @@ pip install requests inquirer windows-curses
 
 ## Usage
 
+**Note:** When downloading ollama models (or any other models you want to use), it's advisable to make sure the quantization is noted in the file/model name. On the Ollama website you can list all models by clicking on "View all". Instead of choosing "qwen3-vl:8b" you would choose "qwen3-vl:8b-thinking-q4_K_M". This makes it easier for you or the LLM analyst, to make sense of the models and their capabilities.
+
 1.  Ensure Ollama is running.
 2.  Make sure your virtual environment is active (see Step 3 above).
 3.  Run the script:
